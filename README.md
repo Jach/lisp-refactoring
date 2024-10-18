@@ -24,6 +24,8 @@ Issue or on Discord or wherever.)
 * [More Preface](#more-preface)
 * [Template](#template)
 ---
+* [Common Functions](#common-functions)
+---
 * [Export Symbol](#export-symbol)
 * [Inline and Import Symbol](#inline-and-import-symbol)
 * [Uninline Symbol](#ninline-symbol)
@@ -57,6 +59,10 @@ slime, but I don't think it's on by default, and what it offered was pretty
 barebones. Maybe things have changed. And someone, I forgot who, was supposedly
 working on an editor-agnostic library a few years ago to support refactoring,
 but I haven't heard any updates about it.)
+
+If I do remember or have heard about slime doing these things, I'll make a note
+of it. For example, the first refactor around exporting symbols should be
+supported by `C-c x` or `slime-export-class`.
 
 These types of automatic edits are *table stakes* for what programmers of other
 languages can expect their editors and IDEs to provide for them. Maybe this
@@ -96,6 +102,8 @@ necessarily restricted to table presentation, of what you should expect to see:
 +-------------------------------------------------------------------------------+
 | Refactoring name. Should be familiar if relevant to other languages.          |
 +-------------------------------------------------------------------------------+
+| Emacs/slime equivalent, if known                                              |
++-------------------------------------------------------------------------------+
 | More detailed description of what's actually meant and should happen with the |
 | refactoring, including an example or two. Should be somewhat motivating.      |
 +-------------------------------------------------------------------------------+
@@ -110,10 +118,92 @@ necessarily restricted to table presentation, of what you should expect to see:
 +-------------------------------------------------------------------------------+
 ```
 
+### Common Functions
+
+If you couldn't already tell, this is all pretty hacky. Here are some common
+functions that will be useful for multiple refactoring commands. A list of
+general pre-requisites beyond using slimv is at the top.
+
+```vim
+" Requirements:
+" SBCL (reach out if you'd like me to investigate for you how to get these working in another impl)
+" slimv https://github.com/kovisoft/slimv/
+" vim-sexp https://github.com/guns/vim-sexp
+"   (however I also recommend vim-sexp-mappings-for-regular-people https://github.com/tpope/vim-sexp-mappings-for-regular-people)
+
+
+function! SlimvEvalQuiet(exp)
+  " Runs exp in the connected Lisp without showing it or its output in the REPL
+  if SlimvConnectSwank()
+    call SlimvFindPackage()
+    let l:result = trim(SlimvCommandGetResponse(':pprint-eval', 'python3 swank_pprint_eval("' . a:exp . '")', 0))
+    return l:result
+  endif
+endfunction
+
+function! UndoubleQuote(str)
+  " given string with a value of `"value"`, strip its surrounding double quotes
+  return substitute(a:str, '^"\(.\{-}\)"$', '\1', '')
+endfunction
+
+function! GetPackageSrc()
+  " consider using shinmera's https://shinmera.github.io/definitions/ if you
+  " need ccl / clasp support...
+  let l:script='
+\ (let* ((src (sb-introspect:find-definition-source *package*))
+\        (path (sb-introspect:definition-source-pathname src))
+\        (form (sb-introspect:definition-source-form-path src))
+\        (form-number (sb-introspect:definition-source-form-number src))
+\        (offset (sb-introspect:definition-source-character-offset src)))
+\   (declare (ignore form form-number offset))
+\   (namestring (or path \"\")))'
+  let l:filename=SlimvEvalQuiet(l:script)
+  return UndoubleQuote(l:filename)
+endfunction
+
+function! GetPackageName()
+  return tolower(UndoubleQuote(SlimvEvalQuiet('(package-name *package*)')))
+endfunction
+
+function! FindDefPackageLine(pkg_name)
+  " Try to find package name for various formats:
+  " (defpackage foo
+  " (defpackage :foo
+  " (defpackage #:foo
+  " (defpackage "FOO"
+  " (defpackage FOO
+  " and above with any spaces/tabs/newlines between the two symbols,
+  " and all case-insensitively (the \c),
+  " and also allowing variants like (cl:defpackage or (uiop:define-package
+  let l:patterns = [
+    \ '\c(\(cl:\)\?defpackage\_s\+' . a:pkg_name,
+    \ '\c(\(cl:\)\?defpackage\_s\+:' . a:pkg_name,
+    \ '\c(\(cl:\)\?defpackage\_s\+#:' . a:pkg_name,
+    \ '\c(\(cl:\)\?defpackage\_s\+"' . toupper(a:pkg_name) . '"',
+    \ '\c(\(uiop:\)\?define-package\_s\+' . a:pkg_name,
+    \ '\c(\(uiop:\)\?define-package\_s\+:' . a:pkg_name,
+    \ '\c(\(uiop:\)\?define-package\_s\+#:' . a:pkg_name,
+    \ '\c(\(uiop:\)\?define-package\_s\+"' . toupper(a:pkg_name) . '"'
+    \ ]
+
+  for l:pattern in l:patterns
+    let l:pkg_start_line = search(l:pattern, 'w')
+    if l:pkg_start_line > 0
+      return l:pkg_start_line
+    endif
+  endfor
+  return 0 " failure, like search itself
+endfunction
+```
+
 ### Export Symbol
 
-You've written a new function or several in your package, and you want it or
-them to be part of the package's public API, so you need to
+Possibly covered by `C-c x` or `slime-export-class` with emacs and slime.
+[This](https://github.com/LispCookbook/cl-cookbook/issues/269) page has some
+details.
+
+Purpose: you've written a new function or several in your package, and you want
+it or them to be part of the package's public API, so you need to
 export[²](#exporting-footnote) the symbols.
 
 ```lisp
@@ -171,13 +261,12 @@ is automatically modified to:
            #:key-pressed?))
 ```
 
-Here's a short video of me removing a bunch of old `@export`s from a file, then
-invoking the refactor on each function and macro.
+Here's a short video of me invoking the refactor on various `@export`'d functions.
 
-(video here)
+![export symbol vid](recs/export-symbol.gif)
 
 > [!NOTE]
-> Notice that the file in the video follows the common convention where
+> Notice that the first file in the video follows the common convention where
 > the `defpackage` form lives in a different file. The refactor command
 > automatically found and opened it in a buffer and made the modifications
 > there.
@@ -189,13 +278,93 @@ list, otherwise it will make a new `:export` section as the last element of the
 Here's the code:
 
 ```vim
-" todo, still a few kinks to fix
+function! ExportSymbol()
+  " Adds the symbol under the cursor to the defpackage's export list.
+
+  " Store current position and buffer and view
+  let l:cur_pos = getpos('.')
+  let l:cur_buf = bufnr('%')
+  let l:cur_view = winsaveview()
+
+  " Get the symbol under cursor
+  let l:symbol = expand('<cword>')
+
+  " Get package name and source file
+  " (note name must come first as it searches current file)
+  let l:pkg_name = GetPackageName()
+  let l:pkg_file = GetPackageSrc()
+  if empty(l:pkg_file)
+    echo "Could not find package source file"
+    return
+  endif
+
+  " Load package file into new buffer if needed
+  let l:pkg_in_other_buf = 0
+  if expand('%:p') !=# l:pkg_file
+    let l:pkg_in_other_buf = 1
+    let l:pkg_buf = bufnr(l:pkg_file)
+    if l:pkg_buf == -1
+      execute 'edit ' . fnameescape(l:pkg_file)
+    else
+      execute 'buffer ' . l:pkg_buf
+    endif
+  endif
+
+  let l:pkg_start_line = FindDefPackageLine(l:pkg_name)
+
+  if l:pkg_start_line == 0
+    echo "Could not find defpackage form"
+    " Close buffer and restore position:
+    execute 'buffer ' . l:cur_buf
+    call setpos('.', l:cur_pos)
+    call winrestview(l:cur_view)
+    return
+  endif
+
+  if !l:pkg_in_other_buf
+    " Need to account for newly added line when moving cursor back
+    let l:cur_pos[1] = l:cur_pos[1]+1
+    let l:cur_view['lnum'] = l:cur_view['lnum']+1
+    let l:cur_view['topline'] = l:cur_view['topline']+1
+  endif
+
+  " Find the end of the defpackage form, move to it
+  execute "normal \<Plug>(sexp_move_to_next_bracket)"
+
+  " Look for existing :export clause in the defpackage boundary,
+  " moving to it if found
+  let l:has_export = search('(:export\_s', 'b', l:pkg_start_line)
+
+  if l:has_export
+    execute "normal \<Plug>(sexp_move_to_next_bracket)"
+    execute "normal i\n#:" . l:symbol
+  else
+    execute "normal i\n(:export #:" . l:symbol . ")"
+  endif
+
+  " Save changes?
+  " write
+
+  " Return to original buffer and position
+  execute 'buffer ' . l:cur_buf
+  call setpos('.', l:cur_pos)
+  call winrestview(l:cur_view)
+endfunction
+
+nnoremap <silent> \ex :call ExportSymbol()<cr>
 ```
 
-Limitations: SBCL only. (Maybe there's a trivial-introspect package I can use.)
-It's assuming you're using slimv and have already loaded your system into Lisp,
-so SBCL knows what file the `defpackage` lives in. If it doesn't know, it will
-assume it's the current buffer, but if it can't find a `defpackage`, it gives up.
+Limitations:
+
+* SBCL only. (Portability option available and mentioned in the
+common functions.)
+* It's assuming you're using slimv and have already loaded your code into Lisp,
+so SBCL knows what file the `defpackage` lives in. If it can't determine that,
+or it can't find the `defpackage` in the file, it gives up.
+* Assumes you haven't run `,g` to override the default package from cl-user when
+  slimv doesn't know otherwise.
+* Does not automatically export the slots or accessors of a class, or the
+  accessors and constructor of a struct.
 
 In theory, vim could search all the files manually itself, and this could be a
 pure text refactor that doesn't depend on SBCL, a Lisp running, or slimv.
