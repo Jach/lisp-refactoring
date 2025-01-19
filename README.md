@@ -19,6 +19,10 @@ This note will go away once I've added what I do have, I just wanted to
 initialize the repo. Probably no one will see this. Feel free to bug me in an
 Issue or on Discord or wherever.)
 
+If you're a vimscript master and want to share an improvement to something here,
+or send me an implementation for something not filled in yet, feel free, I'm
+very much not a master.
+
 ## ToC
 
 * [More Preface](#more-preface)
@@ -175,15 +179,15 @@ function! FindDefPackageLine(pkg_name)
   " and above with any spaces/tabs/newlines between the two symbols,
   " and all case-insensitively (the \c),
   " and also allowing variants like (cl:defpackage or (uiop:define-package
-  let l:patterns = [
-    \ '\c(\(cl:\)\?defpackage\_s\+' . a:pkg_name,
-    \ '\c(\(cl:\)\?defpackage\_s\+:' . a:pkg_name,
-    \ '\c(\(cl:\)\?defpackage\_s\+#:' . a:pkg_name,
-    \ '\c(\(cl:\)\?defpackage\_s\+"' . toupper(a:pkg_name) . '"',
-    \ '\c(\(uiop:\)\?define-package\_s\+' . a:pkg_name,
-    \ '\c(\(uiop:\)\?define-package\_s\+:' . a:pkg_name,
-    \ '\c(\(uiop:\)\?define-package\_s\+#:' . a:pkg_name,
-    \ '\c(\(uiop:\)\?define-package\_s\+"' . toupper(a:pkg_name) . '"'
+let l:patterns = [
+    \ '\c(\(cl:\)\?defpackage\_s\+' . a:pkg_name . '\($\|\_s\|)\|(\)',
+    \ '\c(\(cl:\)\?defpackage\_s\+:' . a:pkg_name . '\($\|\_s\|)\|(\)',
+    \ '\c(\(cl:\)\?defpackage\_s\+#:' . a:pkg_name . '\($\|\_s\|)\|(\)',
+    \ '\c(\(cl:\)\?defpackage\_s\+"' . toupper(a:pkg_name) . '"\($\|\_s\|)\|(\)',
+    \ '\c(\(uiop:\)\?define-package\_s\+' . a:pkg_name . '\($\|\_s\|)\|(\)',
+    \ '\c(\(uiop:\)\?define-package\_s\+:' . a:pkg_name . '\($\|\_s\|)\|(\)',
+    \ '\c(\(uiop:\)\?define-package\_s\+#:' . a:pkg_name . '\($\|\_s\|)\|(\)',
+    \ '\c(\(uiop:\)\?define-package\_s\+"' . toupper(a:pkg_name) . '"\($\|\_s\|)\|(\)'
     \ ]
 
   for l:pattern in l:patterns
@@ -269,7 +273,7 @@ Here's a short video of me invoking the refactor on various `@export`'d function
 > Notice that the first file in the video follows the common convention where
 > the `defpackage` form lives in a different file. The refactor command
 > automatically found and opened it in a buffer and made the modifications
-> there.
+> there. The last file had to be loaded before the export could work.
 
 Also notice that if there's an existing `:export` section it will append to its
 list, otherwise it will make a new `:export` section as the last element of the
@@ -313,11 +317,11 @@ function! ExportSymbol()
   let l:pkg_start_line = FindDefPackageLine(l:pkg_name)
 
   if l:pkg_start_line == 0
-    echo "Could not find defpackage form"
     " Close buffer and restore position:
     execute 'buffer ' . l:cur_buf
     call setpos('.', l:cur_pos)
     call winrestview(l:cur_view)
+    echo "Could not find defpackage form"
     return
   endif
 
