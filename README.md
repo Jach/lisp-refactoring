@@ -23,6 +23,8 @@ If you're a vimscript master and want to share an improvement to something here,
 or send me an implementation for something not filled in yet, feel free, I'm
 very much not a master.
 
+If you just want the code for everything (which may or may not be more up to date than what's in this document) then see [here](https://github.com/Jach/dots/blob/master/.vimrc-lisp-refactoring)
+
 ## ToC
 
 * [More Preface](#more-preface)
