@@ -120,7 +120,7 @@ some important notes about what happened that may not have been obvious.
 #### Code
 
 Code to add to .vimrc to actually do it, and what assumptions or limitations
-it has.                                                                       |
+it has.
 
 ----
 
