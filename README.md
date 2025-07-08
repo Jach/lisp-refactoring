@@ -37,6 +37,7 @@ very much not a master.
 * [Mass Rename](#mass-rename)
 * [Symbol To String](#symbol-to-string)
 * [Extract Function](#extract-function)
+* [Smart Copy](#smart-copy)
 ---
 * [Refactoring Footnote](#refactoring-footnote)
 * [Exporting Footnote](#exporting-footnote)
@@ -122,11 +123,12 @@ necessarily restricted to table presentation, of what you should expect to see:
 +-------------------------------------------------------------------------------+
 ```
 
+TLDR: scroll to the bottom of each refactoring to see if there's code implemented for it yet.
+
 ### Common Functions
 
-If you couldn't already tell, this is all pretty hacky. Here are some common
-functions that will be useful for multiple refactoring commands. A list of
-general pre-requisites beyond using slimv is at the top.
+If you couldn't already tell, this is all pretty hacky, and I used AI tools to help vibe-code a lot as well because I don't really know vimscript well. Here are
+some common functions that will be useful for multiple refactoring commands. A list of general pre-requisites beyond using slimv is at the top.
 
 ```vim
 " Requirements:
@@ -138,6 +140,7 @@ general pre-requisites beyond using slimv is at the top.
 
 function! SlimvEvalQuiet(exp)
   " Runs exp in the connected Lisp without showing it or its output in the REPL
+  " Need to escape any double quotes in exp...
   if SlimvConnectSwank()
     call SlimvFindPackage()
     let l:result = trim(SlimvCommandGetResponse(':pprint-eval', 'python3 swank_pprint_eval("' . a:exp . '")', 0))
@@ -150,11 +153,17 @@ function! UndoubleQuote(str)
   return substitute(a:str, '^"\(.\{-}\)"$', '\1', '')
 endfunction
 
-function! GetPackageSrc()
+function! GetPackageSrc(pkg_name)
   " consider using shinmera's https://shinmera.github.io/definitions/ if you
   " need ccl / clasp support...
+  if a:pkg_name == ''
+    let l:pkg = '*package*'
+  else
+    let l:pkg = '(find-package \"' . toupper(a:pkg_name) . '\")'
+  endif
+
   let l:script='
-\ (let* ((src (sb-introspect:find-definition-source *package*))
+\ (let* ((src (sb-introspect:find-definition-source ' . l:pkg . '))
 \        (path (sb-introspect:definition-source-pathname src))
 \        (form (sb-introspect:definition-source-form-path src))
 \        (form-number (sb-introspect:definition-source-form-number src))
@@ -197,6 +206,65 @@ let l:patterns = [
     endif
   endfor
   return 0 " failure, like search itself
+endfunction
+
+function! GetSymbolPackage(symbol)
+  " Gets the package name of the symbol. Assumes symbols are not |caseSensitive|.
+  let l:script = '(let ((sym (find-symbol \"' . toupper(a:symbol) . '\"))) (when sym (package-name (symbol-package sym))))'
+  let l:result = SlimvEvalQuiet(l:script)
+  return UndoubleQuote(l:result)
+endfunction
+
+function! FindSymbolWithApropos(symbol)
+  " Find symbol using apropos when it's not already imported
+  let l:script = '(let ((results ())) (dolist (sym (apropos-list \"' . toupper(a:symbol) . '\")) (when (string= (symbol-name sym) \"' . toupper(a:symbol) . '\") (push (package-name (symbol-package sym)) results))) (nreverse results))'
+  let l:result = SlimvEvalQuiet(l:script)
+
+  if empty(l:result) || l:result == 'NIL'
+    return ''
+  endif
+
+  " Parse the result - it should be a list of package names
+  let l:result = UndoubleQuote(l:result)
+
+  " Remove outer parentheses and split by spaces, handling quoted strings
+  let l:result = substitute(l:result, '^(\|)$', '', 'g')
+  let l:packages = split(l:result, '\s\+')
+
+  " Clean up package names (remove quotes)
+  let l:clean_packages = []
+  for pkg in l:packages
+    let l:clean_pkg = substitute(pkg, '^"\|"$', '', 'g')
+    if !empty(l:clean_pkg)
+      call add(l:clean_packages, l:clean_pkg)
+    endif
+  endfor
+
+  if empty(l:clean_packages)
+    return ''
+  elseif len(l:clean_packages) == 1
+    return l:clean_packages[0]
+  else
+    " Multiple matches - let user choose
+    echo "Multiple packages found for " . a:symbol . ":"
+    for i in range(len(l:clean_packages))
+      echo (i + 1) . ": " . l:clean_packages[i]
+    endfor
+    let l:choice = input("Choose package (1-" . len(l:clean_packages) . "): ")
+    let l:idx = str2nr(l:choice) - 1
+    if l:idx >= 0 && l:idx < len(l:clean_packages)
+      return l:clean_packages[l:idx]
+    else
+      echo "Invalid choice"
+      return ''
+    endif
+  endif
+endfunction
+
+function! IsSymbolImported(symbol, pkg_name)
+  let l:script = '(multiple-value-bind (sym status) (find-symbol \"' . toupper(a:symbol) . '\" \"' . toupper(a:pkg_name) . '\") (values status (when sym (package-name (symbol-package sym)))))'
+  let l:result = SlimvEvalQuiet(l:script)
+  return l:result !~# 'NIL'
 endfunction
 ```
 
@@ -279,7 +347,7 @@ Also notice that if there's an existing `:export` section it will append to its
 list, otherwise it will make a new `:export` section as the last element of the
 `defpackage`.
 
-Here's the code:
+#### Code
 
 ```vim
 function! ExportSymbol()
@@ -296,7 +364,7 @@ function! ExportSymbol()
   " Get package name and source file
   " (note name must come first as it searches current file)
   let l:pkg_name = GetPackageName()
-  let l:pkg_file = GetPackageSrc()
+  let l:pkg_file = GetPackageSrc('')
   if empty(l:pkg_file)
     echo "Could not find package source file"
     return
@@ -362,9 +430,11 @@ Limitations:
 
 * SBCL only. (Portability option available and mentioned in the
 common functions.)
-* It's assuming you're using slimv and have already loaded your code into Lisp,
+* It's assuming you're using slimv and have already LOADed your code into Lisp,
 so SBCL knows what file the `defpackage` lives in. If it can't determine that,
 or it can't find the `defpackage` in the file, it gives up.
+* Therefore, if you make changes to the defpackage file, be sure to reload it
+  either by reloading the whole system or executing `,L` in the vim buffer.
 * Assumes you haven't run `,g` to override the default package from cl-user when
   slimv doesn't know otherwise.
 * Does not automatically export the slots or accessors of a class, or the
@@ -400,15 +470,135 @@ See this [footnote](#importing-footnote) on why you might not want to do this.
 Like the export symbol refactor, this automatically finds the source location of
 the relevant `defpackage`. It tries to be kind of smart and not add the symbol
 to the import list if it's already been imported, so you can just spam `\in` in
-a series of lines and be good.
+a series of lines and be good. It will also automatically inline all uses of
+that symbol in the buffer.
 
-(code here)
+#### Code
+
+```vim
+function! InlineAndImportSymbol()
+  " Removes the package prefix from the symbol under the cursor,
+  " adds it to the import list,
+  " and replaces ALL full package-prefixed names in the current buffer
+  " with the plain symbol name.
+
+  let l:cur_pos = getpos('.')
+  let l:cur_buf = bufnr('%')
+  let l:cur_view = winsaveview()
+
+  " Get the current word with package prefix
+  let l:line = getline('.')
+  let l:col = col('.')
+
+  " Find package:symbol pattern around cursor
+  let l:start_col = l:col
+  let l:end_col = l:col
+
+  " Expand backwards to find package prefix
+  while l:start_col > 1 && l:line[l:start_col-2] =~# '[a-zA-Z0-9.\-:]'
+    let l:start_col -= 1
+  endwhile
+
+  " Expand forwards to find full symbol
+  while l:end_col < len(l:line) && l:line[l:end_col-1] =~# '[a-zA-Z0-9.\-:?!]'
+    let l:end_col += 1
+  endwhile
+
+  let l:full_symbol = l:line[l:start_col-1:l:end_col-2]
+
+  " Check if it contains a colon (package separator)
+  if l:full_symbol !~# ':'
+    echo "No package prefix found, full_symbol was " . full_symbol
+    return
+  endif
+
+  let l:parts = split(l:full_symbol, ':')
+  if len(l:parts) < 2
+    echo "Invalid package:symbol format"
+    return
+  endif
+
+  let l:pkg_name = l:parts[0]
+  let l:symbol = l:parts[-1]
+
+  " Get current package info
+  let l:cur_pkg_name = GetPackageName()
+  let l:pkg_file = GetPackageSrc('')
+
+  if empty(l:pkg_file)
+    echo "Could not find package source file. Make sure to LOAD the file if you made defpackage changes. cur_pkg_name: " . cur_pkg_name
+    return
+  endif
+
+  " Check if symbol is already imported
+  if IsSymbolImported(l:symbol, l:cur_pkg_name)
+    echo 'Symbol already imported.'
+    " Just do the inline part
+    "execute l:start_col . ',' . (l:end_col-1) . 's/' . escape(l:full_symbol, '/') . '/' . l:symbol . '/'
+    execute '%s/' . escape(l:full_symbol, '/') . '/' . l:symbol . '/g'
+    call setpos('.', l:cur_pos)
+    return
+  endif
+
+  " Open package file
+  let l:pkg_in_other_buf = 0
+  if expand('%:p') !=# l:pkg_file
+    let l:pkg_in_other_buf = 1
+    let l:pkg_buf = bufnr(l:pkg_file)
+    if l:pkg_buf == -1
+      execute 'edit ' . fnameescape(l:pkg_file)
+    else
+      execute 'buffer ' . l:pkg_buf
+    endif
+  endif
+
+  let l:pkg_start_line = FindDefPackageLine(l:cur_pkg_name)
+
+  if l:pkg_start_line == 0
+    execute 'buffer ' . l:cur_buf
+    call setpos('.', l:cur_pos)
+    call winrestview(l:cur_view)
+    echo "Could not find defpackage form"
+    return
+  endif
+
+  " Find end of defpackage
+  call cursor(l:pkg_start_line, 1)
+  execute "normal \<Plug>(sexp_move_to_next_bracket)"
+
+  " Look for existing :import-from clause for this package
+  let l:import_pattern = '(:import-from\_s\+[#]\?[:]\?' . l:pkg_name . '\_s'
+  let l:has_import = search(l:import_pattern, 'b', l:pkg_start_line)
+
+  if l:has_import
+    " Add to existing import list
+    execute "normal \<Plug>(sexp_move_to_next_bracket)"
+    execute "normal i\n#:" . l:symbol
+  else
+    " Create new import-from clause
+    execute "normal i\n(:import-from #:" . l:pkg_name . "\n#:" . l:symbol . ")"
+  endif
+
+  " Return to original buffer and inline the symbol
+  execute 'buffer ' . l:cur_buf
+  call setpos('.', l:cur_pos)
+  call winrestview(l:cur_view)
+
+  " Replace package:symbol with just symbol
+  "execute l:start_col . ',' . (l:end_col-1) . 's/' . escape(l:full_symbol, '/') . '/' . l:symbol . '/'
+  execute '%s/' . escape(l:full_symbol, '/') . '/' . l:symbol . '/g'
+  call setpos('.', l:cur_pos)
+
+  echo "Imported and inlined: " . l:symbol
+endfunction
+
+nnoremap <silent> \in :call InlineAndImportSymbol()<cr>
+```
 
 Limitations: same as export symbol. Additionally, no support for knowing that a
-`:shadowing-import-from` was needed, instead. Doesn't do the inline in all
-places it could, either in the open buffer or in all files of the package as a
-whole -- perhaps that should be an option. But you can easily do the
-search-replace yourself.
+`:shadowing-import-from` was needed, instead. While it does do a mass
+search-replace on the current buffer, it won't touch other files that might be
+in the same package.
 
 ### Uninline Symbol
 
@@ -426,20 +616,56 @@ The uninline symbol refactor (my binding is currently `\uin`) turns this to:
 
 Essentially undoing the inline step from the inline and import symbol refactor.
 
+This refactoring was somewhat inspired by Clojure's
+[Slamhound](https://github.com/technomancy/slamhound) back in the day and it
+made working with Java stuff a lot less tedious.
+
+
 (video here)
 
-(code here)
+#### Code
 
-It does *not* unimport the symbol from the package list. That would require a
+```vim
+function! UninlineSymbol()
+  " Add package prefix to symbol based on its actual package
+
+  let l:symbol = expand('<cword>')
+
+  if empty(l:symbol)
+    echo "No symbol under cursor"
+    return
+  endif
+
+  " Get the package this symbol belongs to
+  let l:pkg_name = GetSymbolPackage(l:symbol)
+
+  " If not found, try apropos as fallback
+  if empty(l:pkg_name) || l:pkg_name == 'nil'
+    let l:pkg_name = FindSymbolWithApropos(l:symbol)
+  endif
+
+  if empty(l:pkg_name) || l:pkg_name == 'nil' || l:pkg_name ==# 'COMMON-LISP-USER'
+    echo "Cannot determine package for symbol: " . l:symbol
+    return
+  endif
+
+  " Replace symbol with package:symbol
+  let l:qualified_symbol = tolower(l:pkg_name) . ':' . l:symbol
+  execute 's/\<' . l:symbol . '\>/' . l:qualified_symbol . '/'
+
+  echo "Uninlined: " . l:qualified_symbol
+endfunction
+
+nnoremap <silent> \uin :call UninlineSymbol()<cr>
+```
+
+Limitations: it does *not* remove the symbol from the package list. That would require a
 more extensive search for all uses in the current package, which can span
 multiple files. Doable in principle, but not covered by this code.
 
-It also doesn't do magic guessing -- if it can't get a result from
-`(symbol-package 'symbol)`, or the result is `cl-user`, nothing will happen. It
-might be an interesting implementation challenge for someone to make something
-happen! I was fond of Clojure's
-[Slamhound](https://github.com/technomancy/slamhound) back in the day and it
-made working with Java stuff a lot less tedious.
+It *does* do a bit of magic guessing. The easiest case is if the symbol is actually imported and interned (i.e. you've loaded the code already). The harder case
+is if you've just typed the code but haven't actually evaluated it yet. Still, we try to find the symbol's home package via `apropos`. This can of course have
+conflicts, but the script should ask you which one you want.
 
 ### Add File To System
 
@@ -487,6 +713,13 @@ them, rather than just immediately doing one thing.
 (video here)
 
 (code here)
+
+Note: should at least be smart enough to handle multiple components in the asd
+file such that if one specifies a module with a directory name like "src/",
+or a module with a name and an explicit :pathname like "src/otherdir", then if
+the current file is in a matching directory it should be added to the component
+list of the correct module. If not, a new module with the new path should be
+added.
 
 ### Mass Rename
 
@@ -639,6 +872,141 @@ function call.
 You know, if you haven't tried LLMs for Lisp code, you should. They're not the
 best with Lisp, but they can do some impressive stuff. It's almost tempting to
 implement a refactoring tool by just calling out to one.
+
+#### Code
+
+```vim
+function! ExtractFunction(visual)
+  " Operates on a visual selection to extract it into a new top-level function.
+  if !a:visual
+    echo "Error: ExtractFunction must be called in Visual mode."
+    return
+  endif
+
+  " --- 1. Reliably get the selected text without using registers ---
+  let l:start_pos = getpos("'<")
+  let l:end_pos = getpos("'>")
+  let l:start_line = line("'<")
+  let l:end_line = line("'>")
+  let l:start_col = col("'<")
+  let l:end_col = col("'>")
+
+  let l:lines = getline(l:start_line, l:end_line)
+  if empty(l:lines)
+    echo "Error: Could not get selected text."
+    return
+  endif
+
+  if l:start_line == l:end_line
+    let l:lines[0] = strpart(l:lines[0], l:start_col - 1, l:end_col - l:start_col + 1)
+  else
+    " Multi-line selection. Handle first and last lines which may be partial.
+    let l:last_idx = len(l:lines) - 1
+    let l:lines[l:last_idx] = strpart(l:lines[l:last_idx], 0, l:end_col)
+    let l:lines[0] = strpart(l:lines[0], l:start_col - 1)
+  endif
+  let l:original_selection_text = join(l:lines, "\n")
+
+
+  " --- 2. Get user input ---
+  let l:func_spec_input = input('New function signature (e.g., my-func arg1 arg2): ')
+  if empty(l:func_spec_input)
+    echo "Extraction cancelled."
+    return
+  endif
+
+  let l:func_spec_parts = split(l:func_spec_input)
+  let l:func_name = l:func_spec_parts[0]
+  let l:params = len(l:func_spec_parts) > 1 ? l:func_spec_parts[1:] : []
+
+  let l:call_site_args = []
+  let l:new_body = l:original_selection_text
+  for l:param in l:params
+    let l:sub_expr = input('Enter call site expression for ''' . l:param . ''': ')
+    if empty(l:sub_expr)
+      echo "Extraction cancelled."
+      return
+    endif
+    call add(l:call_site_args, l:sub_expr)
+    let l:escaped_expr = escape(l:sub_expr, '.*[]^%$\~')
+    let l:new_body = substitute(l:new_body, l:escaped_expr, l:param, 'g')
+  endfor
+
+  " --- 3. Construct new forms ---
+  let l:call_form = '(' . l:func_name . (empty(l:params) ? '' : ' ' . join(l:call_site_args, ' ')) . ')'
+  let l:new_defun_str = "(defun " . l:func_name . " (" . join(l:params, ' ') . ")\n" . l:new_body . ")"
+
+  " --- 4. Perform buffer manipulations ---
+  let l:placement = input("Place function [a]bove or [b]elow current function? (default: below): ")
+  let l:place_above = (l:placement ==? 'a' || l:placement ==? 'above')
+  call setpos('.', l:start_pos)
+  " Find the start of the top-level form (assumes it starts at column 0).
+  call search('^(', 'b')
+  if l:place_above
+    execute "normal! O"
+    let l:insertion_line = line('.') - 1
+  else
+    execute "normal! %"
+    execute "normal! o"
+    let l:insertion_line = line('.')
+  endif
+
+  " Insert the new defun after the current form.
+  call append(l:insertion_line, split(l:new_defun_str, "\n"))
+
+  " Indent the newly added function.
+  let l:new_func_start_line = l:insertion_line + 1
+  let l:new_func_end_line = l:insertion_line + len(split(l:new_defun_str, "\n"))
+  execute l:new_func_start_line . ',' . l:new_func_end_line . 'normal! =='
+
+  " Finally, replace the original selection with the new function call.
+  " Re-select last visual area
+  execute "normal! gv"
+  " Change it
+  execute "normal! c" . l:call_form . "\<Esc>"
+
+  echo "Extracted function '" . l:func_name . "'"
+endfunction
+
+vnoremap <silent> \ef :<C-u>call ExtractFunction(1)<CR>
+```
+
+Limitations: needs the user to visually select the thing they're extracting (fortunately in visual mode, `%` works well). If renamed variables are substrings of other variables, could break the refactored
+function.
+
+### Smart Copy
+
+Right now this is just a wishlist item.
+
+Purpose: you jump-to-source some code that lives in a different package. You
+want to copy part of it out to another file, perhaps the one you were just in.
+The problem is if the code is making reference to imported symbols that aren't
+also imported by the package of the file you're pasting into.
+
+I don't know how best to try and implement this, but essentially when pasting,
+symbols that aren't currently imported should be replaced with their
+package-qualified names. This might even require using a double colon if those
+symbols weren't even exported. If the user wants to import them into the new
+package later, they can do so using the other import refactoring.
+
+One way to approach this: don't do anything to copy/paste, but present a `\fixup`
+command or something. This command works in the context of the entire top-level
+defun-like form, like `,d` does. It could prompt you for an initial package to
+limit its search, or it could just go for it and only prompt if there are
+conflicts. For each symbol it can identify as a function/macro/variable, it
+tries to `apropos` it and get its package name. It then compares to the list of
+packages `use`'d or symbols `import`'d in the current package, and if absent,
+replaces the symbol with the package-qualified one.
+
+One hiccup: if a function was declared inline, it may not be part of any
+package. It will need to be recompiled somewhere (either in the original package
+but now not inlined, or copied over wholesale into the new package).
+
+Having this would beat the otherwise somewhat tedious approach of trying to
+compile and then fixing all the warnings manually about an undefined function
+and so on. sblint can help, of course.
+
+----
 
 ## Refactoring Footnote
 
@@ -934,3 +1302,6 @@ got it right to have package names be reverse-domain-name encoded, so I have
 things like `com.thejach.thing...`. Fortunately, package-local-nicknames are
 everywhere now, you can alias that to just `thing`. (Alas, slimv doesn't
 [play nice](https://github.com/kovisoft/slimv/issues/128) with this yet.)
+(Update: slimv now *does* support local nicknames... but in exchange for giving up fuzzy completions. I have these two lines in my vimrc:
+`map \fuzz :let g:slimv_completions='fuzzy'<cr>` and `map \nofuzz :let g:slimv_completions='swank'<cr>` that let me toggle between the two modes; usually it's
+in fuzzy mode.)
