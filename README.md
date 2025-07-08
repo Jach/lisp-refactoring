@@ -977,10 +977,10 @@ So, what I have implemented below requires a bit of manual effort: the user must
 
 This selection is replaced by a function call, whose name and other details the user supplies in a prompt.
 
-Thus, as we'll see in the video, we don't get the magic "refactor the f function out of labels into its own decode-helper", but we do get a simple refactor of
-the inner let within the cons. Before that though I also show in the video that it's not that hard to break out the f function manually. (It's a bit harder if
+Thus, as we'll see in the video, we don't get the magic "refactor the `f` function out of `labels` into its own `decode-helper`", but we do get a simple refactor of
+the inner `let` within the `cons`. Before that though I also show in the video that it's not that hard to break out the `f` function manually. (It's a bit harder if
 it's a closure and captures some of the surrounding variables, but you'll get a compiler warning soon enough, as I intentionally show below when I don't rename
-the recursive f calls at first.)
+the recursive `f` calls at first.)
 
 #### Video
 
@@ -1084,8 +1084,12 @@ endfunction
 vnoremap <silent> \ef :<C-u>call ExtractFunction(1)<CR>
 ```
 
-Limitations: needs the user to visually select the thing they're extracting (fortunately in visual mode, `%` works well). If renamed variables are substrings of other variables, could break the refactored
-function. If refactoring lines instead of a single paren-wrapped form (like the final test refactor in the video) be careful that the last line doesn't end with a comment, or else the inserted defun won't close properly.
+Limitations:
+
+* Needs the user to visually select the thing they're extracting (fortunately in visual mode, `%` works well to span a sexp).
+* If renamed variables are substrings of other variables, could break the refactored function.
+* If refactoring lines instead of a single paren-wrapped form (like the final test refactor in the video) be careful that the last line doesn't end with a comment, or else the inserted defun won't close properly.
+* Does not attempt to search-replace similar patterns within the rest of the file to replace those with the function call as well.
 
 ## Inline Function
 
@@ -1102,7 +1106,8 @@ Naturally, this refactor should also `macroexpand-1` if the symbol is a macro.
 For CLOS methods, however, what should be done? With multiple dispatch, there's not even "the" function to inline unless you already know your types. I suppose
 this could be a very interactive refactor, asking the user for such types, or just gathering all defmethods and inlining them as a `labels` with a typecase.
 However there's also the complications of any before/after/around methods, and any calls to parent methods with `call-next-method`. I'm going to say, this
-refactor only deals with functions (and can `macroexpand-1` macros?) and leave methods for a separate dream refactor.
+refactor only deals with functions (and can `macroexpand-1` macros?) and leave methods for a separate dream refactor. As a proof case, it shouldn't require too
+much manual effort to turn the defmethod code in [this](https://news.ycombinator.com/item?id=3389933) example to the comment's Scheme-like inlined version.
 
 This refactor can have two modes to it: local and global.
 
@@ -1132,12 +1137,15 @@ Another potential hiccup: if the function was declared inline to the compiler, t
 
 (code here)
 
+----
+
+That's it for now!
 
 ----
 
 ## Refactoring Footnote
 
-It's important to take these definitions seriously. A lot of programmers seem to
+It's important to take the definitions at the top of this page seriously. A lot of programmers seem to
 think that "refactoring" is any kind of code clean up, but it's not. If you have
 "refactored" a piece of code, and suddenly things are not working, or you've
 introduced a bug, or even introduced a new feature at the same time,  *you have
@@ -1156,9 +1164,13 @@ if they are working in a programming language that doesn't have static typing,
 and so, "necessarily", as a consequence (right? right?), doesn't have automated
 refactoring tools to make sure they haven't missed anything.
 
-Fowler's original *Refactoring* book came out in 1999. In it, he used Java for
+First of all, even with tools, you're going to mess up sometimes. You will fail at the refactoring. *That's ok*, so long as it's not too often and you learn from it.
+That fear shouldn't prevent the attempt. I've failed a few times myself with Java and Eclipse not finding methods I'm renaming or what have you that were
+referenced by string for a reflection call or for PowerMock to intercept. I find out about it later and I fix it up to get a complete non-failure refactoring.
+
+Second of all, Fowler's original *Refactoring* book came out in 1999. In it, he used Java for
 the examples. Java is statically typed, and even back then Java IDEs had some
-decent automatic refactoring tools. There's a whole chapter on them. In 2018, he
+decent automatic refactoring tools. There's a whole chapter on them. However, in 2018, he
 released a second edition, but this time in JavaScript. The methods and thinking
 are exactly the same, but he assumes you might not have any automatic
 refactoring tools, so he shows how everything can be done manually. And you have
@@ -1167,7 +1179,7 @@ JavaScript's not so stellar type system, so you need to be careful.
 I'm not saying you should go out and read one of the books -- I haven't even
 read either version, just skimmed a digital copy sometimes -- it's on my backlog
 to read fully. I *am* saying that the book serves as a proof for skeptics that
-refactoring can be done just fine even in the absence of static types or
+refactoring can be done just fine, pretty confidently, even in the absence of static types or
 automated tooling, which is largely our situation with Lisp.
 
 I also think, from what I have seen of the book, that it's quite good at
@@ -1185,7 +1197,7 @@ go with Java.)
 
 He stresses the importance of having a test suite to give you extra confidence
 that you haven't inadvertently broken anything. This is useful even in Java.
-Fowler says, if the code you want to refactor isn't covered by tests, then the
+If the code you want to refactor isn't covered by tests, Fowler says, then the
 first thing you should do is add tests.
 
 Now, I think that's all fine, and I think a good test suite helps refactoring
@@ -1227,7 +1239,7 @@ to some extent why. Use the "Extract Function" refactor a couple times and...
 Before you recoil, can we at least agree that this transformation is trivial,
 doesn't take long to do manually, and by inspection (no compiling, no test
 running, no live running) we are *very confident* we haven't changed any
-behavior yet?
+behavior yet? We didn't need to solve the halting problem, right?
 
 If so, good, that's all I really want to get agreement on from my fellow
 programmers -- that we are intelligent humans and can confidently change code in
@@ -1280,13 +1292,13 @@ rid of that, too, yay.
 But I think what Lisp did do, as far as "public" interfaces go, was wrong, and
 Python did it right. That is, in Python, when you import something, all of that
 file's top level classes and functions are "exported" and trivially available to
-you via the dot syntax, `foo.bar`. Same thing with an object's attributes. But
-in Lisp, only the exported symbols of the package are trivially available as
+you via the dot syntax, `foo.bar`. Same thing with an object's attributes. Same thing with the imported file's `from foo import *` lines.
+But in Lisp, only the exported symbols of the package are trivially available as
 `foo:bar`. If you don't export it, you have to type `foo::bar`. It's annoying.
 
 I more or less understand why they did it: symbols get interned automatically to
-the package, you don't want to export most of them. I still wish things were
-different.
+the package, you don't want to re-export most of them, especially given the giant list of symbols that comes from using the `common-lisp` package.
+I still wish things were different.
 
 There's a convention to prefix stuff with `%` when it really is meant to be
 non-public and furthermore not to be relied upon never changing. It's not a bad
@@ -1295,7 +1307,7 @@ unnecessary when the default is such symbols aren't exported to begin with, so
 you don't need any extra trick.
 
 Since in Python things are "exported" by default, it does have a trick to hide
-them a bit, just put a double underscore in front of them and refer to them like
+some of them a bit, just put a double underscore in front of them and refer to them like
 `self.__attrib`. But it's a total hack, you can still get at the property from
 the outside if you type `obj._ClassName__attrib`.
 
@@ -1303,7 +1315,8 @@ In a language like CL where a certain book author put "kludge" in the index
 followed by a range covering each page, I wonder if some sort of similar kludge
 couldn't have been done at the standardization time to make packages just a bit
 nicer to work with at the cost of an ugly and unprincipled hack like Python's
-`__`.
+`__` or something else. Like, export everything but the special `cl` symbols, or export everything but symbols that come from imports or used packages, or do
+that but allow re-export with an explicit re-export tag somewhere...
 
 ## Importing Footnote
 
