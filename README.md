@@ -9,15 +9,8 @@
 This file is meant to be a collection of techniques and hacks I've developed to
 help me refactor Common Lisp code without so much manual editing.
 
-It's **very much incomplete** at the moment of first commit (sorry), so it's
-also going to serve as a sort of wishlist (with some rants ;)) and motivator for
-me or the unlikely someone else reading to implement something to help with a
-particular refactor, or point to an existing tool. So sadly you might see some
-blank sections, again sorry if I got your hopes up. (Note, as some things just
-take time to write up, I might have a solution, just haven't put it here yet.
-This note will go away once I've added what I do have, I just wanted to
-initialize the repo. Probably no one will see this. Feel free to bug me in an
-Issue or on Discord or wherever.)
+It's **very hacky**. However, there's code and video for each refactor type except "Add File To System", "Mass Rename", and "Inline Function". Those do have
+discussion, however (and mass-rename is doable with vim-grepper), and there's some semi-rants spread throughout. ;)
 
 If you're a vimscript master and want to share an improvement to something here,
 or send me an implementation for something not filled in yet, feel free, I'm
@@ -39,13 +32,13 @@ If you just want the code for everything (which may or may not be more up to dat
 * [Mass Rename](#mass-rename)
 * [Symbol To String](#symbol-to-string)
 * [Extract Function](#extract-function)
-* [Smart Copy](#smart-copy)
+* [Inline Function](#inline-function)
 ---
 * [Refactoring Footnote](#refactoring-footnote)
 * [Exporting Footnote](#exporting-footnote)
 * [Importing Footnote](#importing-footnote)
 
-### More preface
+## More preface
 
 I almost exclusively edit Lisp with vim using
 [slimv](https://github.com/kovisoft/slimv/) -- lately I've even been trying out
@@ -100,34 +93,42 @@ do (I don't use slimv's paredit stuff, though I do use
 those things are *weighty*, even in Hello World, and the refactoring guys want
 me to make more of them?
 
-### Template
+## Template
 
-For each refactoring trick, the following is the ideal template, though not
-necessarily restricted to table presentation, of what you should expect to see:
+For each refactoring trick, the following is the ideal template of what you should expect to see:
 
-```
-+-------------------------------------------------------------------------------+
-| Refactoring name. Should be familiar if relevant to other languages.          |
-+-------------------------------------------------------------------------------+
-| Emacs/slime equivalent, if known                                              |
-+-------------------------------------------------------------------------------+
-| More detailed description of what's actually meant and should happen with the |
-| refactoring, including an example or two. Should be somewhat motivating.      |
-+-------------------------------------------------------------------------------+
-| A short video or gif of a typical usage of the refactor in action.            |
-+-------------------------------------------------------------------------------+
-| If the video example is different (for example, it's on a much larger set of  |
-| code than the tiny example), highlight some important notes about what        |
-| happened that may not have been obvious.                                      |
-+-------------------------------------------------------------------------------+
-| Code to add to .vimrc to actually do it, and what assumptions or limitations  |
-| it has.                                                                       |
-+-------------------------------------------------------------------------------+
-```
+----
+
+## Refactoring name
+
+Should be familiar if relevant to other languages.
+
+If there's an Emacs/slime equivalent I know about, then I'll mention it here.
+
+#### Motivation
+
+More detailed description of what's actually meant and should happen with the
+refactoring, including an example or two. Should be somewhat motivating.
+
+#### Video
+
+A short video or gif of a typical usage of the refactor in action.
+
+If the video example is significantly different from what was given in the motivation (for example, it's on a much larger set of code than the tiny example), highlight
+some important notes about what happened that may not have been obvious.
+
+#### Code
+
+Code to add to .vimrc to actually do it, and what assumptions or limitations
+it has.                                                                       |
+
+----
 
 TLDR: scroll to the bottom of each refactoring to see if there's code implemented for it yet.
 
-### Common Functions
+## Common Functions
+
+Last section before we get to the refactors themselves.
 
 If you couldn't already tell, this is all pretty hacky, and I used AI tools to help vibe-code a lot as well because I don't really know vimscript well. Here are
 some common functions that will be useful for multiple refactoring commands. A list of general pre-requisites beyond using slimv is at the top.
@@ -270,13 +271,17 @@ function! IsSymbolImported(symbol, pkg_name)
 endfunction
 ```
 
-### Export Symbol
+----
+
+## Export Symbol
 
 Possibly covered by `C-c x` or `slime-export-class` with emacs and slime.
 [This](https://github.com/LispCookbook/cl-cookbook/issues/269) page has some
 details.
 
-Purpose: you've written a new function or several in your package, and you want
+#### Motivation
+
+You've written a new function or several in your package, and you want
 it or them to be part of the package's public API, so you need to
 export[²](#exporting-footnote) the symbols.
 
@@ -334,6 +339,8 @@ is automatically modified to:
   (:export #:key-scancode
            #:key-pressed?))
 ```
+
+#### Video
 
 Here's a short video of me invoking the refactor on various `@export`'d functions.
 
@@ -445,7 +452,9 @@ or it can't find the `defpackage` in the file, it gives up.
 In theory, vim could search all the files manually itself, and this could be a
 pure text refactor that doesn't depend on SBCL, a Lisp running, or slimv.
 
-### Inline and Import Symbol
+## Inline and Import Symbol
+
+#### Motivation
 
 You've written code like this:
 
@@ -467,13 +476,15 @@ currently `\in`) on the symbol and you get:
 
 See this [footnote](#importing-footnote) on why you might not want to do this.
 
-(video here)
+#### Video
+
+![inline import vid](recs/inline-and-import.gif)
 
 Like the export symbol refactor, this automatically finds the source location of
 the relevant `defpackage`. It tries to be kind of smart and not add the symbol
 to the import list if it's already been imported, so you can just spam `\in` in
 a series of lines and be good. It will also automatically inline all uses of
-that symbol in the buffer.
+that symbol in the buffer. (See in the video how `cl-ppcre:split` gets turned into `split` on both line 27 and 39.)
 
 #### Code
 
@@ -602,7 +613,9 @@ Limitations: same as export symbol. Additionally, no support for knowing that a
 search-replace on the current buffer, it won't touch other files that might be
 in the same package.
 
-### Uninline Symbol
+## Uninline Symbol
+
+#### Motivation
 
 You're looking at code you or someone wrote like this:
 
@@ -622,8 +635,11 @@ This refactoring was somewhat inspired by Clojure's
 [Slamhound](https://github.com/technomancy/slamhound) back in the day and it
 made working with Java stuff a lot less tedious.
 
+#### Video
 
-(video here)
+![uninline vid](recs/uninline.gif)
+
+Here we essentially undo what the last video did, except the `defpackage` form is unchanged.
 
 #### Code
 
@@ -655,21 +671,27 @@ function! UninlineSymbol()
   let l:qualified_symbol = tolower(l:pkg_name) . ':' . l:symbol
   execute 's/\<' . l:symbol . '\>/' . l:qualified_symbol . '/'
 
-  echo "Uninlined: " . l:qualified_symbol
+  echo "\nUninlined: " . l:qualified_symbol
 endfunction
 
 nnoremap <silent> \uin :call UninlineSymbol()<cr>
 ```
 
-Limitations: it does *not* remove the symbol from the package list. That would require a
-more extensive search for all uses in the current package, which can span
-multiple files. Doable in principle, but not covered by this code.
+Limitations: it does *not* remove the symbol from the `defpackage` list. That would require a
+more extensive search and replace for all uses in the current package, which can span
+multiple files. Doable in principle, but not covered by this code. And to make it extra clear, as in the video, only the symbol under the cursor changes, not
+any other usages of the symbol in the file.
 
 It *does* do a bit of magic guessing. The easiest case is if the symbol is actually imported and interned (i.e. you've loaded the code already). The harder case
 is if you've just typed the code but haven't actually evaluated it yet. Still, we try to find the symbol's home package via `apropos`. This can of course have
-conflicts, but the script should ask you which one you want.
+conflicts, but the script should ask you which one you want, as in the video.
 
-### Add File To System
+This also does not use any package nicknames, just the main package name. (Shown in the video with the un-inlining of `aref` to `common-lisp:aref` instead of
+`cl:aref`.)
+
+## Add File To System
+
+#### Motivation
 
 You've taken some code and split it off into a new file. Now you need to add
 that file to your project's system definition, which means you have to go add it
@@ -712,7 +734,11 @@ they could do more, and so method names encoded as strings could be missed in a
 rename. A lot of refactor tool actions also ask extra questions after you invoke
 them, rather than just immediately doing one thing.
 
+#### Video
+
 (video here)
+
+#### Code
 
 (code here)
 
@@ -723,7 +749,9 @@ the current file is in a matching directory it should be added to the component
 list of the correct module. If not, a new module with the new path should be
 added.
 
-### Mass Rename
+## Mass Rename
+
+#### Motivation
 
 Very common refactor. I want to change the name of my function, or class, or
 variable, and update all uses of the old name to the new name.
@@ -734,11 +762,17 @@ files of your project already open as buffers, and you probably don't want all
 such files open as buffers. Nevertheless, this will find usages in all files of
 your project, whereas other solutions limit themselves to just open buffers.
 
+#### Video
+
 (video here)
 
-(code here)
+#### Code
 
-### Symbol To String
+Again just use vim-grepper, but I should document what I do in an example video.
+
+## Symbol To String
+
+#### Motivation
 
 Goal is to turn any of `symbol`, `#:symbol`, `#'symbol`, `:symbol`, `'symbol`,
 `` `symbol``, `,symbol` into `"symbol"`. This is borderline useful. The main
@@ -753,13 +787,83 @@ strings, and packages being uninterned symbols for their `defpackage` form (and
 optionally uninterned symbols or keyword symbols for their `in-package` form) is
 helpful for distinguishing them further.
 
-(video here)
+#### Video
 
-(code here)
+![sym2string vid](recs/symbol2string.gif)
 
-### Extract Function
+#### Code
 
-Perhaps the most famous refactor, but I don't have vim code for it yet.
+```vim
+" symbol -> quoted string
+" #:blah -> "blah"
+" #'func -> "func"
+" :foo -> "foo"
+" 'some-symbol -> "some-symbol"
+" unquoted:symbol -> "unquoted:symbol"
+" `quasi -> "quasi"
+" ,escaped -> "escaped"
+function! RefactorSymbolToString()
+  " Depends on vim-surround / vim-sexp-mappings-for-regular-people...
+  " should use n2char(getchar())? though surround.vim has its own s:getchar()
+  let cursor_col_idx = col('.') - 1
+  let cur_line = getline('.')
+  let cur_char = cur_line[cursor_col_idx]
+  setlocal iskeyword+=#
+  setlocal iskeyword+='
+  setlocal iskeyword+=`
+  setlocal iskeyword+=,
+  let cur_word_col_idx = strridx(cur_line, expand('<cword>'), cursor_col_idx)
+  setlocal iskeyword-=,
+  setlocal iskeyword-=`
+  setlocal iskeyword-='
+  setlocal iskeyword-=#
+  " note not using <cWORD> since I think that includes too much...
+  "let is_on_keyword = (cur_word_col_idx >=0 && (cur_word_col_idx + strlen(expand('<cword>')) >= cursor_col_idx))
+  let is_at_start_keyword = (cur_word_col_idx == cursor_col_idx)
+  if !is_at_start_keyword
+    " move to it
+    "execute 'normal! B'
+    call sexp#move_to_adjacent_element('n', v:count, 0, 0, 0)
+    " don't infinite loop..
+    if getline('.')[col('.')-1] == '"'
+      return
+    endif
+    return RefactorSymbolToString()
+  endif
+  if cur_char == '#' || cur_char == ':' || cur_char == "'" || cur_char == '`' || cur_char == ','
+    execute 'normal! x'
+    return RefactorSymbolToString()
+  endif
+  " At this point, any prefixes should have been stripped so it's just a naked
+  " symbol we can slap double quotes around.
+  "
+  " I would like to use ysiw" here, since I'm not sure if <cword> captures all
+  " of what counts as a lisp symbol as a 'word', but for some reason it's
+  " busted in a weird way. That is, if you replace the next two lines with
+  " either:
+  " execute 'normal! g@iw"'
+  " or
+  " execute 'normal! ysiw"'
+  " then you'll be left with just the symbol but no surrounding quotes.
+  " However, if you manually type ysiw"
+  " in your editor, then try this command again on other symbols, it will work
+  " and give you the quoted symbol... Well, we'll revisit this when cword
+  " isn't good-enough.
+  let word = expand('<cword>')
+  execute 'normal! ciw"' . word . '"'
+endfunction
+
+map \rf2s :call RefactorSymbolToString()<cr>W
+````
+
+Limitations: as mentioned in the final comment of the code, there might be some instances where what gets quoted isn't what was expected. Let me know if you run
+into one.
+
+## Extract Function
+
+#### Motivation
+
+Perhaps the most famous refactor.
 
 ```lisp
 (defun decode-param (s)
@@ -869,11 +973,18 @@ not be such a high priority value. Where it can showcase more value is when the
 tool can replace the same pattern occurring elsewhere in the file with the new
 function call.
 
-(video here of doing the refactor manually, but making use of vim commands)
+So, what I have implemented below requires a bit of manual effort: the user must select in visual mode the stuff they want to extract.
 
-You know, if you haven't tried LLMs for Lisp code, you should. They're not the
-best with Lisp, but they can do some impressive stuff. It's almost tempting to
-implement a refactoring tool by just calling out to one.
+This selection is replaced by a function call, whose name and other details the user supplies in a prompt.
+
+Thus, as we'll see in the video, we don't get the magic "refactor the f function out of labels into its own decode-helper", but we do get a simple refactor of
+the inner let within the cons. Before that though I also show in the video that it's not that hard to break out the f function manually. (It's a bit harder if
+it's a closure and captures some of the surrounding variables, but you'll get a compiler warning soon enough, as I intentionally show below when I don't rename
+the recursive f calls at first.)
+
+#### Video
+
+![extract function vid](recs/extract-function.gif)
 
 #### Code
 
@@ -974,39 +1085,53 @@ vnoremap <silent> \ef :<C-u>call ExtractFunction(1)<CR>
 ```
 
 Limitations: needs the user to visually select the thing they're extracting (fortunately in visual mode, `%` works well). If renamed variables are substrings of other variables, could break the refactored
-function.
+function. If refactoring lines instead of a single paren-wrapped form (like the final test refactor in the video) be careful that the last line doesn't end with a comment, or else the inserted defun won't close properly.
 
-### Smart Copy
+## Inline Function
 
-Right now this is just a wishlist item.
+#### Motivation
 
-Purpose: you jump-to-source some code that lives in a different package. You
-want to copy part of it out to another file, perhaps the one you were just in.
-The problem is if the code is making reference to imported symbols that aren't
-also imported by the package of the file you're pasting into.
+Inverse of extract function.
 
-I don't know how best to try and implement this, but essentially when pasting,
-symbols that aren't currently imported should be replaced with their
-package-qualified names. This might even require using a double colon if those
-symbols weren't even exported. If the user wants to import them into the new
-package later, they can do so using the other import refactoring.
+It's especially useful with other people's code if you feel they sometimes have gone too far with extracting functions and you're
+finding them annoying rather than helpful. Yes, you can always jump to source and back, but if you have to do this too much to understand a piece of code, the
+functions probably aren't well-factored, and it will be easier to read them inline.
 
-One way to approach this: don't do anything to copy/paste, but present a `\fixup`
-command or something. This command works in the context of the entire top-level
-defun-like form, like `,d` does. It could prompt you for an initial package to
-limit its search, or it could just go for it and only prompt if there are
-conflicts. For each symbol it can identify as a function/macro/variable, it
-tries to `apropos` it and get its package name. It then compares to the list of
-packages `use`'d or symbols `import`'d in the current package, and if absent,
-replaces the symbol with the package-qualified one.
+Naturally, this refactor should also `macroexpand-1` if the symbol is a macro.
 
-One hiccup: if a function was declared inline, it may not be part of any
-package. It will need to be recompiled somewhere (either in the original package
-but now not inlined, or copied over wholesale into the new package).
+For CLOS methods, however, what should be done? With multiple dispatch, there's not even "the" function to inline unless you already know your types. I suppose
+this could be a very interactive refactor, asking the user for such types, or just gathering all defmethods and inlining them as a `labels` with a typecase.
+However there's also the complications of any before/after/around methods, and any calls to parent methods with `call-next-method`. I'm going to say, this
+refactor only deals with functions (and can `macroexpand-1` macros?) and leave methods for a separate dream refactor.
 
-Having this would beat the otherwise somewhat tedious approach of trying to
-compile and then fixing all the warnings manually about an undefined function
-and so on. sblint can help, of course.
+This refactor can have two modes to it: local and global.
+
+The local mode only inlines the current call in the current file. It doesn't delete the source function, either. This is mainly for the cases where you just
+want to quickly see it with inline context, and will probably undo the inline later.
+
+The global mode is a global search-replace. It would rely on using the cross-referencing capabilities of the Lisp implementation to find all instances of
+`who-calls` and go fix up those call sites with the inlined function code, and finally delete the original function definition.
+
+This can be a rather difficult refactor to implement because it also depends on a sort of "smart copy" feature. For example, the function you're inlining might
+be referring to symbols that it has privately imported in its own package that you have not. Does the refactor also import the same symbols to your package?
+What if there are conflicts? What if you are trying to do it globally, are you going to also change the defpackage's of all the other packages of code that uses
+this function?
+
+Perhaps it could be another user input selection. In general I think it's better to convert them to package-qualified names if they aren't already imported by
+the package they're getting inlined into. (Have to make sure that they actually are imported from the same parent, not just other imported symbols from other
+packages with the same name.) But I can see a lot of circumstances where you want a global inline and also want every package that used the old function to
+import what's needed to keep the original function source the same. Potential name conflicts can be resolved by the user outside the refactor command.
+
+Another potential hiccup: if the function was declared inline to the compiler, then it might not show up in cross-referencing who-calls checks.
+
+#### Video
+
+(video here)
+
+#### Code
+
+(code here)
+
 
 ----
 
